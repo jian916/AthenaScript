@@ -1,0 +1,83 @@
+/**************************************************\
+Name: 稅收商店 Tax NPC
+Design by: Jian ROLab.org
+Design Date: 2017-6-10
+Version: 1.0
+
+V1.0 2017-6-10
+	完成基本功能
+
+\**************************************************/
+
+prontera,164,106,3	script	稅收商店	456,{
+	if(select("購買物品","設定稅率") == 1){
+		dispbottom "稅收商店: 本商店 [低價買進] 無效，販售物品都是含稅價格。";
+		callshop "tax_shop",1;
+		npcshopattach "tax_shop";
+		end;
+	}
+	dispbottom "設定稅率, 100 為原始價格, 請輸入 100~150 (單位1/100)";
+	input $tax_rate,100,150;
+	dispbottom "目前物品售價為 "+$tax_rate+"% (稅收為 "+($tax_rate-100)+"%)";
+	for(set .@i,0; .@i<.sell_size; set .@i,.@i+1){ // 更新販售價格
+		npcshopupdate "tax_shop",.sell_item[.@i],getiteminfo(.sell_item[.@i],0)*$tax_rate/100; // 計算稅後價格
+	}
+end;
+OnBuyItem:
+	set .@size,getarraysize(@bought_nameid);
+	set .@total_zeny,0;
+	set .@tax,0;
+	for(set .@i,0; .@i<.@size; set .@i,.@i+1){
+		if(@bought_quantity[.@i] > 0){
+			set .@total_zeny,.@total_zeny+getiteminfo(@bought_nameid[.@i],0)*@bought_quantity[.@i];
+		}
+	}
+	// 防止無效0
+	if($tax_rate > 100) set .@tax,.@total_zeny*($tax_rate-100); // 計算稅(Athena不支援小數)
+	while(1){
+		if(.@tax > 2000000000){ // 防止溢位Bug
+			mes "錯誤，稅後價格過高。";
+			break;
+		}
+		if(.@tax) set .@tax,.@tax/100;
+		set .@total_zeny,.@total_zeny+.@tax; // 含稅
+		if(.@total_zeny > 2000000000){
+			mes "錯誤，購買物品總總價格過高。";
+			break;
+		}
+		if(Zeny < .@total_zeny){
+			mes "你身上的 Zeny 不足 "+.@total_zeny;
+			break;
+		}
+		set Zeny,Zeny-.@total_zeny;
+		for(set .@i,0; .@i<.@size; set .@i,.@i+1){
+			if(@bought_quantity[.@i] > 0){
+				getitem @bought_nameid[.@i],@bought_quantity[.@i];
+			}
+		}
+		set $tax_total,$tax_total+.@tax;
+		dispbottom "交易成功, 你購買的物品含稅總價 "+.@total_zeny+" Zeny, 稅收 "+.@tax+" Zeny";
+		dispbottom "目前總稅收 "+$tax_total+" Zeny";
+		break;
+	}
+	deletearray @bought_quantity,.@size;
+	deletearray @bought_nameid,.@size;
+end;
+OnInit:
+	setarray .sell_item,501,502,503,504,505; // 設定商店販售物品
+	if($tax_rate == 0){ // 初始化永久變數
+		set $tax_rate,100;
+		set $tax_total,0;
+	}
+	set .sell_size,getarraysize(.sell_item);
+	npcshopitem "tax_shop",0,0; // 清空商店物品
+	npcshopdelitem "tax_shop",0,0;
+	for(set .@i,0; .@i<.sell_size; set .@i,.@i+1){ // 物品上架
+		npcshopadditem "tax_shop",.sell_item[.@i],getiteminfo(.sell_item[.@i],0)*$tax_rate/100; // 計算稅後價格
+	}
+	delwaitingroom;
+	waitingroom "稅收商店",0;
+end;
+}
+// 預設商店
+-	shop	tax_shop	-1,501:1000
