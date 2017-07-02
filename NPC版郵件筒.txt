@@ -1,0 +1,449 @@
+/**************************************************\
+Name: NPC版郵件筒 NPC Mail Box
+Design by: Jian ROLab.org
+Design Date: 2017-2-16
+Version: 1.2
+
+使用前要關閉模擬器 NPC 原始的郵件筒
+npc\re\scripts_athena.conf
+註解 npc: npc/re/other/mail.txt
+
+本腳本使用 SQL 原始的 Mail 資料表
+替代 2015 登入器沒有 Mail 的方案, 不支援新版 RODEX 資料表
+如果在非 rA 模擬器上使用, 自行修改 dispbottom -> announce
+
+V1.0 2017-2-16
+	完成基本架構
+V1.1 2017-3-31
+	修正 NPC 任務圖標 看完信件自動隱藏
+	修正 目前信件封數 即時更新顯示
+	修復一些流程問題
+V1.2 2017-5-30
+	改臨時變數紀錄 降低SQL查詢頻率
+	修正圖示BUG
+
+\**************************************************/
+
+// 發送信件 (標題最多 45 byte, 內容最多 255 byte)
+// sendmail <收件人CID>,"發件人姓名","標題","內容"{,<zeny>{,<物品id>,<數量>{,<精煉>,<卡片1>,<卡片2>,<卡片3>,<卡片4>}}}
+function	script	sendmail	{
+	while(1){
+		if(getargcount() < 5) break;
+		if(getarg(0,0)<150000 || getarg(1,"")=="" || getarg(2,"")=="" || getarg(3,"")=="") break;
+		if(set(.@destName$,cid2name(getarg(0))) == "") break;
+		query_sql("INSERT INTO `mail` (`send_name`,`dest_name`,`dest_id`,`title`,`message`,`time`,`status`,`zeny`,`nameid`,`amount`,`refine`,`attribute`,`identify`,`card0`,`card1`,`card2`,`card3`) VALUES ('"
+			+escape_sql(getarg(1))+"','"+escape_sql(.@destName$)+"','"+getarg(0)+"','"+escape_sql(getarg(2))+"','"+escape_sql(getarg(3))+"',unix_timestamp(now()),'1','"
+			+getarg(4,0)+"','"+getarg(5,0)+"','"+getarg(6,0)+"','"+getarg(7,0)+"','0','1','"+getarg(8,0)+"','"+getarg(9,0)+"','"+getarg(10,0)+"','"+getarg(11,0)+"')");
+		if(attachrid(cid2aid(getarg(0)))){
+			set @mail_count_new,@mail_count_new+1;
+			dispbottom "您有一封新的信件，請至[郵件筒]領取。",0xFFAD33;
+		}
+		return 1;
+	}
+	debugmes "[sendmail] 郵件寄送失敗。 From "+getarg(1,"")+" To CID "+getarg(0,0);
+	return 0;
+}
+
+// CID轉角色名稱
+function	script	cid2name	{
+	if(getarg(0,0) < 150000) return "";
+	query_sql "SELECT `name` FROM `char` WHERE `char_id` = '"+getarg(0)+"'",.@name$;
+	return .@name$;
+}
+
+// CID轉AID
+function	script	cid2aid	{
+	if(getarg(0,0) < 150000) return 0;
+	query_sql "SELECT `account_id` FROM `char` WHERE `char_id` = '"+getarg(0)+"'",.@aid;
+	return .@aid;
+}
+
+// 道具超連結 Ex. mes itemLink(501);
+// 參數1: 物品編號
+// 參數2: 設定1=顯示洞數
+function	script	itemLink	{
+	if(PACKETVER >= 20150513)
+		return "<ITEM>"+getitemname(getarg(0))+((getarg(1,0) && set(.@slot,getitemslots(getarg(0))))?"["+.@slot+"]":"")+"<INFO>"+getarg(0)+"</INFO></ITEM>";
+	else if(PACKETVER >= 20130515)
+		return "<ITEMLINK>"+getitemname(getarg(0))+((getarg(1,0) && set(.@slot,getitemslots(getarg(0))))?"["+.@slot+"]":"")+"<INFO>"+getarg(0)+"</INFO></ITEMLINK>";
+	else
+		return getitemname(getarg(0))+((getarg(1,0) && set(.@slot,getitemslots(getarg(0))))?"["+.@slot+"]":"");
+}
+
+// 時間戳 轉 時間字串
+function	script	timestamp2date	{
+	if(getarg(0,0) == 0) return 0;
+	query_sql("SELECT FROM_UNIXTIME("+getarg(0)+",'"+getarg(1,"%Y-%m-%d %H:%i:%S")+"')",.@date$);
+	return .@date$;
+}
+
+// 主程式 替換 npc/other/mail.txt
+-	script	Mailbox#dummy::MailBox	-1,{
+	function main_mes;
+	function zenyCheck;
+	mes .npcName$;
+	mes "想要使用郵件筒的話";
+	mes "需要 130 Zeny，";
+	mes "請問你要使用嗎?";
+	if(select("使用:不使用") == 2){
+		next;
+		mes .npcName$;
+		mes "沒關係，期待您下次光臨~";
+		close;
+	}
+	next;
+	mes .npcName$;
+	if(Zeny < 130){
+		mes "您沒有足夠的金幣，";
+		mes "想要使用郵遞筒的話，";
+		mes "需要 130 Zeny";
+		close;
+	}
+	set .@mail_count_total,main_mes();
+	set Zeny,Zeny-130;
+	while(1){
+		switch(select("^0000FF讀取信件^000000","一次全部領取","刪除已領取物品的信件","^FF0000刪除全部信件^000000")){
+			case 1:
+			{
+				if(.@mail_count_total < .mailbox_list) set .@page_max,0;
+				else set .@page_max,(.@mail_count_total-1)/.mailbox_list;
+				set .@page,0;
+				while(1){
+					set .@count,query_sql("SELECT `id`,`send_name`,`title`,`status`,`zeny`,`amount` FROM `mail` WHERE `dest_id`='"+getcharid(0)+"' ORDER BY `id` ASC LIMIT "+(.@page*.mailbox_list)+","+.mailbox_list,.@id,.@name$,.@title$,.@status,.@zeny,.@amount);
+					if(.@count == 0){
+						next;
+						mes .npcName$;
+						mes "信箱已經沒有信件了。";
+						close;
+					}
+					mes "請選擇要讀取的信件:";
+					mes "^FF0000註^000000: [!=未讀] [$=有金錢] [*=有道具]";
+					if(.@page > 0) set .@select$," - ^0000FF上一頁^000000 -:";
+					else set .@select$,"";
+					for(set .@m,0;.@m<.@count;set .@m,.@m+1){
+						set .@num,(.@page*.mailbox_list)+.@m+1;
+						set .@select$,.@select$+.@num+".["+(.@status[.@m]==1?"!":" ")+(.@zeny[.@m]?"$":" ")+(.@amount[.@m]?"*":" ")+"] "+replacestr(.@title$[.@m],":",";")+"("+replacestr(.@name$[.@m],":",";")+"):";
+					}
+					if(.@page_max > 0){
+						if(.@page != .@page_max) set .@select$,.@select$+" - ^0000FF下一頁^000000 -";
+					} else set .@select$,.@select$+" - ^0000FF上一頁^000000 -";
+					while(1){
+						set .@key,select(.@select$)-1;
+						if(.@page_max > 0){
+							if(.@page > 0){
+								if(.@key == 0){
+									set .@page,.@page-1;
+									break;
+								}
+								set .@key,.@key-1; //上一頁選項補1
+							}
+							if(.@page_max > .@page && .@key == .@count){
+								set .@page,.@page+1;
+								break;
+							}
+						}
+						if(.@key == .@count) break;
+						query_sql("SELECT `send_name`,`title`,`message`,`time`,`zeny`,`nameid`,`amount`,`refine`,`card0`,`card1`,`card2`,`card3` FROM `mail` WHERE `id`='"+.@id[.@key]+"'",.@name$,.@title$,.@message$,.@time,.@zeny,.@item,.@amount,.@refine,.@card0,.@card1,.@card2,.@card3);
+						next;
+						mes .npcName$;
+						mes "===================================";
+						mes "來自: "+.@name$;
+						mes "標題: "+.@title$;
+						mes "-----------------------------------";
+						mes "內容:";
+						mes "　　"+.@message$;
+						mes "-----------------------------------";
+						if(.@item && .@amount) mes "物品: "+itemLink(.@item)+" x "+.@amount;
+						if(.@zeny) mes "Zeny: "+.@zeny;
+						mes "時間: "+timestamp2date(.@time);
+						mes "===================================";
+						query_sql("UPDATE `mail` SET `status`='2' WHERE `id`='"+.@id[.@key]+"'");
+						switch(select(
+							((.@zeny&&.@amount)?" - 全部領取":""),
+							(.@zeny?" - 領取 "+.@zeny+" Zeny":""),
+							(.@amount?" - 領取 "+getitemname(.@item)+" x "+.@amount:""),
+							" - ^FF0000刪除信件^000000",
+							" - ^0000FF上一頁^000000 -"
+						)){
+							case 1:
+								zenyCheck(.@zeny);
+								if(.@amount){
+									weightCheck(getiteminfo(.@item,6)*.@amount);
+								}
+								query_sql "UPDATE `mail` SET `zeny`=0,`nameid`=0,`amount`=0,`refine`=0,`identify`=0,`card0`=0,`card1`=0,`card2`=0,`card3`=0 WHERE `id`='"+.@id[.@key]+"'";
+								if(.@zeny){
+									set Zeny,Zeny+.@zeny;
+									mes "領取 "+.@zeny+" Zeny 成功。";
+								}
+								if(.@amount){
+									set .@type,getiteminfo(.@item,2);
+									if(.@type==4 || .@type==5){
+										getitem2 .@item,.@amount,1,.@refine,0,.@card0,.@card1,.@card2,.@card3;
+									} else {
+										getitem .@item,.@amount;
+									}
+									mes "領取 "+itemLink(.@item)+" x "+.@amount+" 成功。";
+								}
+							break;
+							case 2:
+								zenyCheck(.@zeny);
+								query_sql "UPDATE `mail` SET `zeny`=0 WHERE `id`='"+.@id[.@key]+"'";
+								set Zeny,Zeny+.@zeny;
+								mes "領取 "+.@zeny+" Zeny 成功。";
+							break;
+							case 3:
+								weightCheck(getiteminfo(.@item,6)*.@amount);
+								set .@type,getiteminfo(.@item,2);
+								query_sql "UPDATE `mail` SET `nameid`=0,`amount`=0,`refine`=0,`identify`=0,`card0`=0,`card1`=0,`card2`=0,`card3`=0 WHERE `id`='"+.@id[.@key]+"'";
+								if(.@type==4 || .@type==5){
+									getitem2 .@item,.@amount,1,.@refine,0,.@card0,.@card1,.@card2,.@card3;
+								} else {
+									getitem .@item,.@amount;
+								}
+								mes "領取 "+itemLink(.@item)+" x "+.@amount+" 成功。";
+							break;
+							case 4:
+								if(.@zeny || .@amount){
+									next;
+									mes .npcName$;
+									mes "^FF1A75信件內還有物品未領取，";
+									mes "確定要刪除嗎?^000000";
+									if(select("[ ^0000FF取　消^000000 ]","[ ^FF0000確　定^000000 ]")==1) break;
+								}
+								query_sql "DELETE FROM `mail` WHERE `id`='"+.@id[.@key]+"'";
+								mes "刪除信件成功。";
+							break;
+						}
+						break;
+					}
+					if(.@page_max == 0 && .@key == .@count) break; // 上一頁
+					next;
+					mes .npcName$;
+					set .@mail_count_total,main_mes();
+				}
+			}
+			break;
+			case 2:
+				next;
+				mes .npcName$;
+				set .@count,query_sql("SELECT `id`,`zeny`,`nameid`,`amount`,`refine`,`card0`,`card1`,`card2`,`card3` FROM `mail` WHERE (`zeny`>0 OR `amount`>0) AND `dest_id`='"+getcharid(0)+"'",.@id,.@zeny,.@item,.@amount,.@refine,.@card0,.@card1,.@card2,.@card3);
+				if(.@count == 0){
+					mes "所有信件內都沒有物品。";
+					next;
+					break;
+				}
+				mes "^751AFF一共有 "+.@count+" 封信件內有物品，";
+				mes "確定要全部領取嗎?^000000";
+				if(select("[ ^FF0000確　定^000000 ]","[ ^0000FF取　消^000000 ]")==2) break;
+				for(set .@i,0; .@i<.@count; set .@i,.@i+1){
+					zenyCheck(.@zeny[.@i]);
+					if(.@amount[.@i]){
+						weightCheck(getiteminfo(.@item[.@i],6)*.@amount[.@i]);
+					}
+					query_sql "UPDATE `mail` SET `zeny`=0,`nameid`=0,`amount`=0,`refine`=0,`identify`=0,`card0`=0,`card1`=0,`card2`=0,`card3`=0 WHERE `id`='"+.@id[.@i]+"'";
+					if(.@zeny[.@i]){
+						set Zeny,Zeny+.@zeny[.@i];
+						mes "領取 "+.@zeny+" Zeny 成功。";
+					}
+					if(.@amount[.@i]){
+						set .@type,getiteminfo(.@item[.@i],2);
+						if(.@type==4 || .@type==5){
+							getitem2 .@item[.@i],.@amount[.@i],1,.@refine[.@i],0,.@card0[.@i],.@card1[.@i],.@card2[.@i],.@card3[.@i];
+						} else {
+							getitem .@item[.@i],.@amount[.@i];
+						}
+						mes "領取 "+itemLink(.@item)+" x "+.@amount+" 成功。";
+					}
+					sleep2(100);
+				}
+				mes "全部領取成功。";
+				next;
+			break;
+			case 3:
+				next;
+				mes .npcName$;
+				query_sql "SELECT COUNT(`id`) FROM `mail` WHERE `zeny`=0 AND `amount`=0 AND `dest_id`='"+getcharid(0)+"'",.@count;
+				if(.@count == 0){
+					mes "信箱內沒有已領取物品的信件。";
+					next;
+					break;
+				}
+				mes "^0000FF未領取物品的信件不會被刪除^000000";
+				mes "全部刪除後，";
+				mes "信件內容將無法回復，";
+				mes "確定要刪除嗎?";
+				if(select("[ ^0000FF取　消^000000 ]","[ ^FF0000確　定^000000 ]")==1) break;
+				query_sql "DELETE FROM `mail` WHERE `zeny`=0 AND `amount`=0 AND `dest_id`='"+getcharid(0)+"'";
+				mes "刪除已領取物品的信件成功。";
+				next;
+			break;
+			case 4:
+				next;
+				mes .npcName$;
+				mes "^FF1A75全部刪除後，";
+				mes "信件內如果有物品將無法取回，";
+				mes "確定要刪除嗎?^000000";
+				if(select("[ ^0000FF取　消^000000 ]","[ ^FF0000確　定^000000 ]")==1) break;
+				query_sql "DELETE FROM `mail` WHERE `dest_id`='"+getcharid(0)+"'";
+				mes "刪除所有信件成功。";
+				close;
+			break;
+		}
+		next;
+		mes .npcName$;
+		set .@mail_count_total,main_mes();
+	}
+end;
+
+	function main_mes {
+		query_sql "SELECT COUNT(`id`) FROM `mail` WHERE dest_id="+getcharid(0),.@mail_count_total;
+		if(.@mail_count_total == 0){
+			set @mail_count_new,0;
+			showevent QTYPE_NONE;
+			mes "信箱目前沒有信件喔。";
+			close;
+		}
+		query_sql "SELECT COUNT(`id`) FROM `mail` WHERE `status`=1 AND `dest_id`="+getcharid(0),@mail_count_new;
+		query_sql "SELECT COUNT(`id`) FROM `mail` WHERE `status`=2 AND `dest_id`="+getcharid(0),.@mail_count_old;
+		if(@mail_count_new == 0) showevent QTYPE_NONE;
+		mes "目前總共有 [ "+.@mail_count_total+" ] 封信件";
+		mes "未讀取的有 [ "+@mail_count_new+" ] 封";
+		mes "已讀取的有 [ "+.@mail_count_old+" ] 封";
+		return .@mail_count_total;
+	}
+	// Zeny 超過上限檢測 zenyCheck(<增加多少>)
+	function zenyCheck {
+		if(MAX_ZENY-getarg(0,0) < Zeny){
+			next;
+			mes "[^FF0000錯誤^000000]";
+			mes "- 請稍等一下！";
+			mes "- 您身上攜帶太多金幣了，";
+			mes "- 無法容納 "+getarg(0,0);
+			mes "- 請花完後再來吧。";
+			close;
+		}
+		return;
+	}
+	// 負重檢測 weightCheck(10) 單位1/10
+	function weightCheck {
+		if(MaxWeight < Weight+getarg(0)){
+			next;
+			mes "[^FF0000錯誤^000000]";
+			mes "- 請稍等一下！";
+			mes "- 您身上攜帶太多東西了，";
+			mes "- 請您清理背包後再來吧。";
+			close;
+		}
+		return;
+	}
+
+OnInit:
+	set .npcName$,"[ ^FF0088郵件筒^000000 ]";
+	// 查詢信箱一頁最多顯示幾筆資料
+	set .mailbox_list,10;
+end;
+
+OnTouch:
+	// 有信件就顯示 NPC 任務圖標
+	if(@mail_count_new){
+		dispbottom "您有 "+@mail_count_new+" 封未讀的信件，請至[郵件筒]領取。",0xFFAD33;
+		showevent QTYPE_EVENT,2;
+	}
+end;
+}
+
+-	script	MailboxEvent	-1,{
+end;
+OnPCLoginEvent:
+	// 登入提醒
+	query_sql "SELECT COUNT(`id`) FROM `mail` WHERE `status`=1 AND `dest_id`="+getcharid(0),@mail_count_new;
+	if(@mail_count_new) dispbottom "系統提示: 您有 "+@mail_count_new+" 封未讀的信件，請至[郵件筒]領取。",0xFFAD33;
+end;
+}
+
+// 普隆德拉
+//============================================================
+prontera,146,86,0	duplicate(MailBox)	郵件筒#prt	888,10,10
+prontera,272,213,0	duplicate(MailBox)	郵件筒#2prt	888,10,10
+prontera,40,213,0	duplicate(MailBox)	郵件筒#3prt	888,10,10
+
+// 伊斯魯得島
+//============================================================
+izlude,122,113,0	duplicate(MailBox)	郵件筒#iz	888,10,10
+
+// 夢羅克
+//============================================================
+moc_ruins,72,166,0	duplicate(MailBox)	郵件筒#1moc	888,10,10
+moc_ruins,156,52,0	duplicate(MailBox)	郵件筒#2moc	888,10,10
+
+// 吉芬
+//============================================================
+geffen,115,67,0	duplicate(MailBox)	郵件筒#gef	888,10,10
+geffen,199,125,0	duplicate(MailBox)	郵件筒#2gef	888,10,10
+
+// 斐揚
+//============================================================
+payon,191,104,0	duplicate(MailBox)	郵件筒#pay	888,10,10
+payon,171,226,0	duplicate(MailBox)	郵件筒#2pay	888,10,10
+pay_arche,55,127,0	duplicate(MailBox)	郵件筒#3pay	888,10,10
+
+// 艾爾貝塔
+//============================================================
+alberta,90,60,0	duplicate(MailBox)	郵件筒#alb	888,10,10
+alberta,30,240,0	duplicate(MailBox)	郵件筒#2alb	888,10,10
+
+// 艾爾帕蘭
+//============================================================
+aldebaran,135,122,0	duplicate(MailBox)	郵件筒#alde	888,10,10
+
+// 朱諾
+//============================================================
+yuno,148,187,0	duplicate(MailBox)	郵件筒#yuno	888,10,10
+yuno,332,108,0	duplicate(MailBox)	郵件筒#2yuno	888,10,10
+
+// 裡希塔樂鎮
+//============================================================
+lighthalzen,164,85,0	duplicate(MailBox)	郵件筒#lht	888,10,10
+lighthalzen,196,320,0	duplicate(MailBox)	郵件筒#2lht	888,10,10
+
+// 艾音布羅克、艾音貝赫
+//============================================================
+einbroch,231,215,0	duplicate(MailBox)	郵件筒#ein	888,10,10
+einbroch,77,202,0	duplicate(MailBox)	郵件筒#2ein	888,10,10
+einbech,182,124,0	duplicate(MailBox)	郵件筒#3ein	888,10,10
+
+// 克魔島
+//============================================================
+comodo,200,150,0	duplicate(MailBox)	郵件筒#cmd	888,10,10
+
+// 汶巴拉
+//============================================================
+umbala,104,155,0	duplicate(MailBox)	郵件筒#um	888,10,10
+
+// 天津町
+//============================================================
+amatsu,102,146,0	duplicate(MailBox)	郵件筒#ama	888,10,10
+
+// 崑崙
+//============================================================
+gonryun,152,117,0	duplicate(MailBox)	郵件筒#gon	888,10,10
+
+// 哎呦泰雅
+//============================================================
+ayothaya,205,169,0	duplicate(MailBox)	郵件筒#ayo	888,10,10
+
+// 洛陽
+//============================================================
+louyang,204,100,0	duplicate(MailBox)	郵件筒#lou	888,10,10
+
+// 毀葛
+//============================================================
+hugel,86,168,0	duplicate(MailBox)	郵件筒#hu	111,10,10
+
+// 拉赫
+//============================================================
+rachel,122,146,0	duplicate(MailBox)	郵件筒#ra	888,10,10
+
+// 菲音斯
+//============================================================
+veins,218,123,0	duplicate(MailBox)	郵件筒#ve	888,10,10

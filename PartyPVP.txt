@@ -1,0 +1,181 @@
+dewata,179,111,4	script	隊伍擂台	855,{
+	if(getcharid(1) == 0){
+		mes "[隊伍擂台]";
+		mes "你好像沒有隊伍耶...";
+		close;
+	}
+	if(getgmlevel() >= 99){
+		if(select("玩家選單","GM功能") == 2){
+			switch(select("開始報名","開始比賽","直接關閉")){
+				case 1: goto OnPKRegis;
+				case 2: goto OnPKStart;
+				case 3: goto OnPKEnd;
+			}
+		}
+	}
+	if(.GDPlay == 0){
+		mes "[隊伍擂台]";
+		mes "現在不是報名時間";
+		mes "報名時間：每天晚上7點45分至7點59分";
+		mes "遊戲開始時間：8點整";
+		mes "遊戲時間：最久1小時。";
+		mes "遊戲內容：報名的2個組隊互相PK。";
+		mes "說明：本遊戲純屬娛樂用途，獎品並沒有非常的好";
+		close;
+	}
+	if(.GDPlay == 2){
+		mes "[隊伍擂台]";
+		mes "現在裡面正在比賽";
+		close;
+	}
+	set .@pid,getcharid(1);
+	if(.PartyId1 == .@pid || .PartyId2 == .@pid){
+		mes "[隊伍擂台]";
+		mes "你已經報名過了";
+		close;
+	}
+	mes "[隊伍擂台]";
+	mes "每天的晚上8:00";
+	mes "會進行一次2隊互打的隊伍擂台";
+	mes "死1人對方加1分";
+	mes "只要有一人先陣亡，將回傳到場內出生點";
+	mes "直到比分至50分。";
+	mes "報名費：1000000z";
+	mes "報名隊伍(一)： "+(.PartyId1<1?"尚未報名":getpartyname(.PartyId1))+" 隊伍";
+	mes "報名隊伍(二)： "+(.PartyId2<1?"尚未報名":getpartyname(.PartyId2))+" 隊伍";
+	next;
+	select("我要報名");
+	if(Zeny < 1000000){
+		mes "[隊伍擂台]";
+		mes "沒錢還來找我報名...";
+		close;
+	}
+	if(.PartyId1 == 0){
+		set .PartyId1,.@pid;
+	} else if(.PartyId2 == 0){
+		set .PartyId2,.@pid;
+	} else {
+		mes "[隊伍擂台]";
+		mes "不好意思，報名客滿了喔!!";
+		close;
+	}
+	set Zeny,Zeny-1000000;
+	mes "[隊伍擂台]";
+	mes "報名成功";
+	mes "報名隊伍(一)： "+getpartyname(.PartyId1)+" 隊伍";
+	mes "報名隊伍(二)： "+(.PartyId2<1?"尚未報名":getpartyname(.PartyId2))+" 隊伍";
+	close;
+
+OnTimer5000:
+	if(.PartyId2 > 0 && .PartyId1 > 0 && .GDPlay > 0){
+		if(getpartyleader(.PartyId2,4) != "pvp_n_3-5"){
+			announce "【隊伍擂台】第二隊隊長中離，第一隊直接獲勝。",0;
+			goto OnParty1Win;
+		}
+		if(getpartyleader(.PartyId1,4) != "pvp_n_3-5"){
+			announce "【隊伍擂台】第一隊隊長中離，第二隊直接獲勝。",0;
+			goto OnParty2Win;
+		}
+		initnpctimer;
+	}
+end;
+
+OnClock1945:
+OnPKRegis:
+	set .PartyId1,0;
+	set .PartyId2,0;
+	set .Party1Score,0;
+	set .Party2Score,0;
+	set .GDPlay,1;
+	announce "【隊伍擂台】現在開始報名，時間只有15分鐘。",0;
+end;
+
+OnClock2000:
+OnPKStart:
+	if(.GDPlay != 1) end;
+	if(.PartyId1 == 0 || .PartyId2 == 0){
+		announce "【隊伍擂台】人數不足，活動取消",0;
+		goto OnPKEnd;
+	}
+	if(getpartyname(.PartyId1) == "null" || getpartyname(.PartyId2) == "null"){
+		announce "【隊伍擂台】隊伍無效，活動取消",0;
+		goto OnPKEnd;
+	}
+	warpparty "pvp_n_3-5",65,99,.PartyId1;
+	warpparty "pvp_n_3-5",133,100,.PartyId2;
+	set .GDPlay,2;
+	set .Party1Score,0;
+	set .Party2Score,0;
+	initnpctimer;
+end;
+
+OnClock2100:
+	if(.GDPlay < 2) end;
+	if(.Party1Score > .Party2Score){
+		announce "【隊伍擂台】時間到，第一隊獲勝。",0;
+		goto OnParty1Win;
+	} else if(.Party1Score < .Party2Score){
+		announce "【隊伍擂台】時間到，第二隊獲勝。",0;
+		goto OnParty2Win;
+	} else {
+		announce "【隊伍擂台】2隊平手，無人勝出。",0;
+		warpparty "SavePoint",0,0,.PartyId1;
+		warpparty "SavePoint",0,0,.PartyId2;
+		goto OnPKEnd;
+	}
+end;
+
+OnPCKillEvent:
+	if(.GDPlay < 2) end;
+	if("pvp_n_3-5" == strcharinfo(3)){
+		if(getcharid(1) == .PartyId1){
+			set .Party1Score,.Party1Score+1;
+		} else if(getcharid(1) == .PartyId2){
+			set .Party2Score,.Party2Score+1;
+		} else end;
+		announce "【隊伍擂台】目前分數：",0;
+		announce "【隊伍擂台】隊伍1("+getpartyname(.PartyId1)+")：隊伍2("+getpartyname(.PartyId2)+")",0;
+		announce "【隊伍擂台】["+.Party1Score+"]:["+.Party2Score+"]",0;
+		sleep2 3000;
+		atcommand "@raisemap";
+		if(.Party1Score >= 50){
+			announce "【隊伍擂台】第一隊獲勝。",0;
+			goto OnParty1Win;
+		} else if(.Party2Score >= 50){
+			announce "【隊伍擂台】第二隊獲勝。",0;
+			goto OnParty2Win;
+		}
+		warpparty "pvp_n_3-5",65,99,.PartyId1;
+		warpparty "pvp_n_3-5",133,100,.PartyId2;
+	}
+end;
+
+OnPCLogoutEvent:
+	if(.GDPlay < 2) end;
+	if("pvp_n_3-5" == strcharinfo(3)){
+		if(getcharid(1) == .PartyId1){
+			announce "【隊伍擂台】第一隊隊員中離，第二隊直接獲勝。",0;
+			goto OnParty2Win;
+		} else if(getcharid(1) == .PartyId2){
+			announce "【隊伍擂台】第二隊隊員中離，第一隊直接獲勝。",0;
+			goto OnParty1Win;
+		}
+	}
+end;
+
+OnParty1Win:
+	warpparty "guild_room",42,285,.PartyId1;
+	warpparty "SavePoint",0,0,.PartyId2;
+	goto OnPKEnd;
+OnParty2Win:
+	warpparty "SavePoint",0,0,.PartyId1;
+	warpparty "guild_room",42,285,.PartyId2;
+OnInit:
+OnPKEnd:
+	set .PartyId1,0;
+	set .PartyId2,0;
+	set .Party1Score,0;
+	set .Party2Score,0;
+	set .GDPlay,0;
+end;
+}
