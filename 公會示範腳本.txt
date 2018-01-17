@@ -1,0 +1,35 @@
+﻿prontera,100,100,0	公會變數	100,{
+	set .@gid,getcharid(2);
+	if(.@gid == 0){
+		mes "您目前無公會";
+		close;
+	}
+	if(select("設定變數","開啟商店") == 1)
+		setd("$guild_variable_"+.@gid,select("變數設定 1","變數設定 2","變數設定 3"));
+	else
+		callshop "guild_shop"+getd("$guild_variable_"+.@gid),1;
+end;
+}
+-	shop	guild_shop1	-1,501:1111
+-	shop	guild_shop2	-1,502:2222
+-	shop	guild_shop3	-1,503:3333
+
+
+
+-	AgitReward#main	-1,{
+end;
+OnAgitEnd:
+	if(set(.@map$,strnpcinfo(2)) == "main") end;
+	if(set(.@gid,getcastledata(.@map$,1))){
+		announce "公會 ["+getguildname(.@gid)+"] 佔領秘密基地 ["+getcastlename(.@map$)+"] 獲得城戰獎勵",bc_all;
+		script4each "{ getitem 501,1; }",8,.@gid;
+		end;
+	}
+end;
+}
+// 設定要執行的城堡
+-	duplicate(AgitReward)	AgitReward#payg_cas01	-1
+-	duplicate(AgitReward)	AgitReward#payg_cas02	-1
+-	duplicate(AgitReward)	AgitReward#payg_cas03	-1
+-	duplicate(AgitReward)	AgitReward#payg_cas04	-1
+-	duplicate(AgitReward)	AgitReward#payg_cas05	-1
