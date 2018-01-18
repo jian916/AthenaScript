@@ -32,26 +32,27 @@ OnKillMobEvent:
 	setd(".mob_"+killedrid+"_count",.@count);
 end;
 OnKillBossEvent:
-	if(.cooldown_time > 0) end; // 不管是不是在MVP的CD時間內, 還是會召喚BOSS, 但不觸發召喚MVP條件
 	set .boss_count,.boss_count+1;
-	if(.boss_count > 4){
-		set .cooldown_time,1;
-		set .boss_count,0;
+	if(.boss_count < 4) end;
+	set .boss_count,0;
+	if(.cooldown_time > 0){ // 不管是不是在MVP的CD時間內, 還是會召喚BOSS, 但不觸發召喚MVP條件
 		mapannounce "lhz_dun_n","死神的聲音：原來你不是正港的勇士。",bc_map,0xFF0000;
-		set .@mvp_id,.lhz_mvp[rand(.mvp_size)];
-		switch(rand(7)){
-			case 0: set .@x,40;   set .@y,210; break;
-			case 1: set .@x,140;  set .@y,232; break;
-			case 2: set .@x,238;  set .@y,203; break;
-			case 3: set .@x,238;  set .@y,140; break;
-			case 4: set .@x,140;  set .@y,65;  break;
-			case 5: set .@x,30;   set .@y,140; break;
-			case 6: set .@x,140;  set .@y,150; break;
-		}
-		monster "lhz_dun_n",.@x,.@y,"--ja--",.@mvp_id,1,"mvp_lhz_dun_n::OnKillMvpEvent";
-		explode(.@mvp_name$,getmonsterinfo(.@mvp_id,MOB_NAME)," "); // 只取後段名稱
-		mapannounce "lhz_dun_n","死神的聲音：正港的勇士終於出現了，你好啊~"+.@mvp_name$[1]+"，好久不見啊!",bc_map,0xFF0000;
+		end;
 	}
+	set .cooldown_time,1;
+	set .@mvp_id,.lhz_mvp[rand(.mvp_size)];
+	switch(rand(7)){
+		case 0: set .@x,40;   set .@y,210; break;
+		case 1: set .@x,140;  set .@y,232; break;
+		case 2: set .@x,238;  set .@y,203; break;
+		case 3: set .@x,238;  set .@y,140; break;
+		case 4: set .@x,140;  set .@y,65;  break;
+		case 5: set .@x,30;   set .@y,140; break;
+		case 6: set .@x,140;  set .@y,150; break;
+	}
+	monster "lhz_dun_n",.@x,.@y,"--ja--",.@mvp_id,1,"mvp_lhz_dun_n::OnKillMvpEvent";
+	explode(.@mvp_name$,getmonsterinfo(.@mvp_id,MOB_NAME)," "); // 只取後段名稱
+	mapannounce "lhz_dun_n","死神的聲音：正港的勇士終於出現了，你好啊~"+.@mvp_name$[1]+"，好久不見啊!",bc_map,0xFF0000;
 end;
 OnKillMvpEvent:
 	mapannounce "lhz_dun_n","死神的聲音：後會有期了，曾是戰士的你喔!",bc_map,0x00FF00;
@@ -62,6 +63,7 @@ OnTimer7200000:
 	killmonster "lhz_dun_n","mvp_lhz_dun_n::OnKillBossEvent";
 	for(set .@i,0; .@i<.mob_size; set .@i,.@i+1)
 		setd(".mob_"+.lhz_mob[.@i]+"_count",0); // 重新計算普通怪計數
+	set .boss_count,0;
 	set .cooldown_time,0;
 	announce "死神的聲音：來吧!正港的戰士喔!",bc_all,0x00FF00;
 end;
